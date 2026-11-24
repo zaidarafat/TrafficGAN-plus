@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+data/
+results/
+results_v1_unconditional/
+paper/
+results_for_paper.zip
+run_log*.txt
+*.pt
+*.npz
+*.pkl
+.ipynb_checkpoints/
+.DS_Store

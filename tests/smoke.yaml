@@ -1,0 +1,81 @@
+# Tiny settings for tests/smoke_test.sh only. Results are meaningless.
+paths:
+  raw_root: tests/raw
+  processed_root: tests/processed
+  results_root: tests/results
+data:
+  T: 10
+  k_max: 10
+  min_flows_per_class: 100
+  max_windows_per_class_total: 2000
+  split:
+  - 0.7
+  - 0.15
+  - 0.15
+  max_train_windows_per_class: 300
+  max_eval_windows_per_class: 150
+  log_transform: true
+  dedup: false
+  discrete_max_unique: 32
+  split_seed: 0
+model:
+  n_z: 100
+  emb_dim: 64
+  conv_channels:
+  - 64
+  - 128
+  hidden: 128
+  dropout: 0.2
+  leaky_slope: 0.2
+train:
+  batch_size: 32
+  n_iters: 40
+  n_critic: 5
+  lr: 0.0002
+  betas:
+  - 0.5
+  - 0.9
+  lambda_gp: 10.0
+  gamma_tgp: 5.0
+  beta_ase: 0.1
+  eta_cls: 1.0
+  label_smoothing: 0.1
+  tgp_one_sided: false
+  eval_every: 20
+  patience: 3
+  val_samples: 200
+  disable_cudnn_in_critic: true
+eval:
+  n_syn_windows: 500
+  ks_bootstrap: 10
+  ks_subsample: 200
+  prdc_k: 5
+  prdc_n: 300
+  disc_epochs: 1
+  aug_factor: 2.0
+  rf_trees: 10
+  dnn_epochs: 1
+  perturb: 0.05
+experiments:
+  seeds:
+  - 0
+  - 1
+  sensitivity_seeds:
+  - 0
+  gamma_grid:
+  - 0
+  - 5
+  beta_grid:
+  - 0
+  - 0.1
+  T_grid:
+  - 5
+  - 10
+  baseline_epochs:
+    ctgan: 2
+    copulagan: 2
+    dgan: 2
+    timegan_iters: 20
+    ddpm_iters: 50
+    ddpm_steps: 20
+    mlp_gan_iters: 40

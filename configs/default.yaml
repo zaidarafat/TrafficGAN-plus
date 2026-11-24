@@ -1,0 +1,76 @@
+# TrafficGAN+ experiment configuration.
+# Every value here is reported in the manuscript; change it here, not in code.
+
+paths:
+  raw_root: data/raw            # used only for datasets not listed below
+  datasets:                     # folders containing the original CSV files (sub-folders are searched too)
+    cicids2017: "data/raw/cicids2017"      # MachineLearningCVE, 8 CSVs
+    unsw_nb15:  "data/raw/unsw_nb15"      # raw UNSW-NB15_1..4.csv are used
+    cicids2018: "data/raw/cicids2018"     # 10 daily CSVs
+  processed_root: data/processed
+  results_root: results
+
+data:
+  T: 10                          # flows per window
+  k_max: 10                      # keep at most this many classes (largest first, benign always kept)
+  min_flows_per_class: 1000      # drop classes with fewer flows (=100 windows at T=10)
+  max_windows_per_class_total: 40000  # uniform random subsample of windows per class while reading
+  split: [0.70, 0.15, 0.15]      # train / val / test, stratified by class, at window level
+  max_train_windows_per_class: 20000   # cap (benign mainly) to bound training time; null = no cap
+  max_eval_windows_per_class: 20000    # cap for val/test windows per class; null = no cap
+  log_transform: true            # signed log1p before min-max scaling (heavy-tailed counts/rates)
+  dedup: false                   # drop exact duplicate flow records before windowing
+  discrete_max_unique: 32        # integer columns with <= this many values are treated as discrete
+  split_seed: 0                  # data split is fixed across model seeds
+
+model:
+  n_z: 100
+  emb_dim: 64
+  conv_channels: [64, 128]
+  hidden: 128
+  dropout: 0.2
+  leaky_slope: 0.2
+
+train:
+  batch_size: 128
+  n_iters: 10000                 # generator iterations (each with n_critic critic steps)
+  n_critic: 5
+  lr: 0.0002
+  betas: [0.5, 0.9]
+  lambda_gp: 10.0
+  gamma_tgp: 5.0
+  beta_ase: 0.1
+  eta_cls: 1.0
+  label_smoothing: 0.1
+  tgp_one_sided: false
+  eval_every: 250                # iterations between validation checks
+  patience: 12                   # early stopping: checks without improvement of validation KS
+  val_samples: 2000              # windows used for the validation KS check
+  disable_cudnn_in_critic: true  # cuDNN LSTM does not support double backprop (needed by GP/TGP)
+
+eval:
+  n_syn_windows: 50000           # synthetic windows for fidelity metrics (= 500,000 flows at T=10)
+  ks_bootstrap: 1000             # bootstrap subsamples for KS
+  ks_subsample: 1000             # flows per bootstrap subsample
+  prdc_k: 5
+  prdc_n: 5000
+  disc_epochs: 5                 # post-hoc discriminator (discriminative score)
+  aug_factor: 2.0                # +200%: add 2x the training windows of every attack class
+  rf_trees: 100
+  dnn_epochs: 10
+  perturb: 0.05                  # +/-5% multiplicative timing perturbation for robustness
+
+experiments:
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  sensitivity_seeds: [0, 1, 2]
+  gamma_grid: [0, 1, 2.5, 5, 10]
+  beta_grid: [0, 0.05, 0.1, 0.2]
+  T_grid: [5, 10, 20]
+  baseline_epochs:
+    ctgan: 100
+    copulagan: 100
+    dgan: 200
+    timegan_iters: 10000
+    ddpm_iters: 20000
+    ddpm_steps: 1000
+    mlp_gan_iters: 10000
