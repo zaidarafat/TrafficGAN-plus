@@ -58,9 +58,14 @@ python scripts/run_experiments.py main        --dataset unsw_nb15  --methods non
 python scripts/run_experiments.py prepare     --dataset cicids2018
 python scripts/run_experiments.py main        --dataset cicids2018 --methods none smote ctgan timegan dgan wgan_gp trafficgan
 python scripts/run_experiments.py transfer    --source cicids2017 --target cicids2018
-python scripts/make_tables.py
+python scripts/run_experiments.py backbone    --dataset cicids2017   # Transformer backbone (Section 4.8)
+python scripts/run_experiments.py diagnostic  --dataset cicids2017   # runs that log TGP activity (Table S9)
+python scripts/make_tables.py                                        # every table and figure of the paper
+python scripts/diagnostics.py                                        # Table 11 and Tables S6-S9 (CPU only)
 python scripts/export_for_paper.py
 ```
+
+`scripts/run_revision2.bat` (Windows) and `scripts/run_revision2.sh` run the `backbone` and `diagnostic` stages in two parallel processes and then rebuild all tables.
 
 Configuration values can be overridden from the command line, for example `--set train.n_iters=5000`.
 
@@ -83,8 +88,11 @@ The full schedule takes several days on one RTX 3090. The critic LSTM runs witho
 | `no_tgp`, `no_ase` | Ablations | γ = 0 / β = 0 |
 | `alt_sn`, `alt_lp` | TGP → spectral normalization / one-sided GP (WGAN-LP) | GP kept, TGP removed |
 | `alt_acgan`, `alt_pacgan` | ASE → AC-GAN class loss / PacGAN | ASE removed |
+| `tr_wgan_gp`, `tr_tgp`, `tr_ase`, `tr_trafficgan` | Transformer backbone without regularizers, with TGP, with ASE, with both | `tg/models.py` (`TransformerGenerator`, `TransformerCritic`); sizes in `configs/default.yaml`, section `transformer` |
 
 The critic is class-conditioned through a projection term (Miyato and Koyama, 2018). Flow-level generators produce single flows, and groups of T consecutive generated flows form a window.
+
+The Transformer backbone uses three pre-LayerNorm encoder blocks (d_model = 128, 4 heads) in both networks. The generator receives a global noise vector, a per-step noise vector and the class embedding at every step; the critic uses the same score, projection and auxiliary heads as the CNN-LSTM critic. Self-attention is written with explicit matrix products, because fused attention kernels cannot be differentiated twice, which GP and TGP require. Training uses the protocol of the CNN-LSTM model, with an Adam learning rate of 1e-4.
 
 ## Protocol
 
@@ -105,7 +113,7 @@ tg/train_gan.py             Algorithm 1 and its variants
 tg/metrics.py, tg/ids.py    evaluation metrics and IDS classifiers
 tg/experiment.py            one run: train → metrics → augmentation → IDS; transfer experiment
 tg/baselines/               TabDDPM-style model, TimeGAN, wrappers for SDV and gretel-synthetics
-scripts/                    command-line interface, table and figure generation
+scripts/                    command-line interface, table and figure generation, diagnostics (Table 11, Tables S6-S9)
 tests/                      TGP identity test and smoke test on synthetic data
 ```
 

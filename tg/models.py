@@ -96,3 +96,102 @@ class MLPCritic(nn.Module):
 
     def forward(self, x, c):
         return self.net(torch.cat([x, F.one_hot(c, self.K).float()], 1)).squeeze(1)
+
+
+# --------------------------------------------------------------------------- stronger backbone (Section 4.8)
+class _SelfAttention(nn.Module):
+    """Multi-head self-attention written with explicit matrix products, so that the critic can be
+    differentiated twice (GP and TGP need double back-propagation; fused attention kernels do not support it)."""
+
+    def __init__(self, d_model, n_heads, dropout=0.0):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.h, self.dk = n_heads, d_model // n_heads
+        self.qkv = nn.Linear(d_model, 3 * d_model)
+        self.out = nn.Linear(d_model, d_model)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B, T, _ = x.shape
+        q, k, v = self.qkv(x).view(B, T, 3, self.h, self.dk).permute(2, 0, 3, 1, 4)
+        att = torch.softmax(q @ k.transpose(-1, -2) / self.dk ** 0.5, dim=-1)
+        y = (self.drop(att) @ v).transpose(1, 2).reshape(B, T, self.h * self.dk)
+        return self.out(y)
+
+
+class _Block(nn.Module):
+    """Pre-LayerNorm Transformer encoder block. LayerNorm acts per sample, so it is compatible with GP/TGP."""
+
+    def __init__(self, d_model, n_heads, ff, dropout=0.0):
+        super().__init__()
+        self.n1, self.n2 = nn.LayerNorm(d_model), nn.LayerNorm(d_model)
+        self.att = _SelfAttention(d_model, n_heads, dropout)
+        self.mlp = nn.Sequential(nn.Linear(d_model, ff), nn.GELU(), nn.Linear(ff, d_model))
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = x + self.drop(self.att(self.n1(x)))
+        return x + self.drop(self.mlp(self.n2(x)))
+
+
+class TransformerGenerator(nn.Module):
+    """G(z, c) for windows of T flows. Each step receives the class embedding, a projection of the global noise,
+    its own noise vector and a learned position embedding; n_layers pre-LN Transformer blocks model the
+    dependencies between all flows of the window; a per-step linear head and tanh give the T x d output.
+    The latent vector z holds the global part (n_z) followed by the per-step parts (T * z_step)."""
+
+    def __init__(self, d, T, K, n_z=100, d_model=128, n_layers=3, n_heads=4, ff=256, z_step=16, **_):
+        super().__init__()
+        self.T, self.d, self.K, self.z_global, self.z_step = T, d, K, n_z, z_step
+        self.n_z = n_z + T * z_step
+        self.cls = nn.Embedding(K, d_model)
+        self.zg = nn.Linear(n_z, d_model)
+        self.zs = nn.Linear(z_step, d_model)
+        self.pos = nn.Parameter(torch.randn(1, T, d_model) * 0.02)
+        self.blocks = nn.ModuleList([_Block(d_model, n_heads, ff) for _ in range(n_layers)])
+        self.norm = nn.LayerNorm(d_model)
+        self.out = nn.Linear(d_model, d)
+
+    def forward(self, z, c):
+        zg, zs = z[:, :self.z_global], z[:, self.z_global:].reshape(-1, self.T, self.z_step)
+        h = self.pos + self.zs(zs) + (self.zg(zg) + self.cls(c)).unsqueeze(1)
+        for b in self.blocks:
+            h = b(h)
+        return torch.tanh(self.out(self.norm(h)))
+
+
+class TransformerCritic(nn.Module):
+    """D(x, c) and q(.|x) with a Transformer trunk: linear embedding of each flow + position embedding ->
+    n_layers pre-LN blocks -> LayerNorm -> mean over time. Same heads as Critic: linear score with projection
+    conditioning, MLP auxiliary classifier; pack > 1 implements PacGAN."""
+
+    def __init__(self, d, T, K, d_model=128, n_layers=3, n_heads=4, ff=256, dropout=0.1, spectral=False, pack=1,
+                 conditional="projection", **_):
+        super().__init__()
+        sn = spectral_norm if spectral else (lambda m, **k: m)
+        self.pack, self.conditional = pack, conditional
+        self.inp = sn(nn.Linear(d * pack, d_model))
+        self.pos = nn.Parameter(torch.randn(1, T, d_model) * 0.02)
+        self.blocks = nn.ModuleList([_Block(d_model, n_heads, ff, dropout) for _ in range(n_layers)])
+        self.norm = nn.LayerNorm(d_model)
+        self.score = sn(nn.Linear(d_model, 1))
+        self.aux = nn.Sequential(nn.Linear(d_model, 64), nn.ReLU(), nn.Linear(64, K))
+        if conditional == "projection":
+            self.embed = sn(nn.Embedding(K, d_model))
+            if not spectral:
+                nn.init.normal_(self.embed.weight, 0, 0.02)
+
+    packed = Critic.packed
+
+    def trunk(self, x):
+        h = self.inp(x) + self.pos
+        for b in self.blocks:
+            h = b(h)
+        return self.norm(h).mean(1)
+
+    def forward(self, x, c=None, already_packed=False):
+        hb = self.trunk(x if already_packed else self.packed(x))
+        s = self.score(hb).squeeze(1)
+        if self.conditional == "projection":
+            s = s + (self.embed(c) * hb).sum(1)
+        return s, self.aux(hb)

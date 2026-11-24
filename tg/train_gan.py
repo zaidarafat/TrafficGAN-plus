@@ -4,9 +4,9 @@ import contextlib, copy, json, os, time
 import numpy as np
 import torch
 import torch.nn.functional as F
-from .models import Generator, Critic, MLPGenerator, MLPCritic
+from .models import Generator, Critic, MLPGenerator, MLPCritic, TransformerGenerator, TransformerCritic
 from .losses import (input_gradient, gradient_penalty, temporal_gradient_penalty, aux_loss,
-                     attack_scenario_entropy)
+                     attack_scenario_entropy, increment_gradients)
 from .utils import set_seed, device, mean_ks_fast
 
 # variant -> overrides of the train config (Table 8 and Section 4.6)
@@ -20,7 +20,26 @@ VARIANTS = {
     "alt_acgan":    dict(beta_ase=0.0, acgan_weight=1.0),     # ASE -> AC-GAN class-consistency loss
     "alt_pacgan":   dict(beta_ase=0.0, pack=2),               # ASE -> PacGAN, pack size 2
     "tgp_onesided": dict(tgp_one_sided=True),
+    # stronger backbone (Section 4.8): Transformer generator and critic, same objective and training protocol
+    "tr_wgan_gp":    dict(backbone="transformer", gamma_tgp=0.0, beta_ase=0.0),
+    "tr_tgp":        dict(backbone="transformer", beta_ase=0.0),
+    "tr_ase":        dict(backbone="transformer", gamma_tgp=0.0),
+    "tr_trafficgan": dict(backbone="transformer"),
 }
+BACKBONE_VARIANTS = ["tr_wgan_gp", "tr_tgp", "tr_ase", "tr_trafficgan"]
+
+
+@torch.no_grad()
+def tgp_stats(a):
+    """Diagnostics of the critic gradient at the interpolates (Table S9): global norm ||a||, increment-gradient
+    norms ||g_t|| (Eq. 5), the ratio ||g_1|| / ||a|| (at most sqrt(T-1) by Proposition 1), the share of
+    ||g_t|| > 1 and the TGP value (Eq. 6)."""
+    a = a.detach().float()
+    n = a.flatten(1).norm(dim=1)
+    g = increment_gradients(a).norm(dim=2)
+    return dict(gp_norm=n.mean().item(), g_mean=g.mean().item(), g_max=g.max(1).values.mean().item(),
+                g1_over_grad=(g[:, 0] / n.clamp_min(1e-12)).mean().item(),
+                g_frac_above1=(g > 1).float().mean().item(), tgp_value=((g - 1) ** 2).mean().item())
 
 
 class ClassSampler:
@@ -69,8 +88,14 @@ def train_trafficgan(data, cfg, variant="trafficgan", seed=0, out_dir=None, over
     K = int(max(ytr.max(), yva.max()) + 1)
     mc = cfg["model"]
     pack = int(tc.get("pack", 1))
-    G = Generator(d, T, K, **mc).to(dev)
-    D = Critic(d, T, K, spectral=tc.get("spectral", False), pack=pack, **mc).to(dev)
+    if tc.get("backbone", "cnn_lstm") == "transformer":
+        tcfg = dict(cfg["transformer"])
+        tc["lr"] = tcfg.pop("lr", tc["lr"])
+        G = TransformerGenerator(d, T, K, n_z=mc["n_z"], **tcfg).to(dev)
+        D = TransformerCritic(d, T, K, spectral=tc.get("spectral", False), pack=pack, **tcfg).to(dev)
+    else:
+        G = Generator(d, T, K, **mc).to(dev)
+        D = Critic(d, T, K, spectral=tc.get("spectral", False), pack=pack, **mc).to(dev)
     oG = torch.optim.Adam(G.parameters(), lr=tc["lr"], betas=tuple(tc["betas"]))
     oD = torch.optim.Adam(D.parameters(), lr=tc["lr"], betas=tuple(tc["betas"]))
     smp = ClassSampler(Xtr, ytr, K, rng)
@@ -121,7 +146,7 @@ def train_trafficgan(data, cfg, variant="trafficgan", seed=0, out_dir=None, over
             with torch.no_grad():
                 w_est = (sr.mean() - sf.mean()).item()
             hist.append(dict(iter=it, loss_D=loss.item(), loss_G=lossG.item(), ase_nats=ase.item(),
-                             critic_W_estimate=w_est, val_ks=ks, elapsed_s=time.time() - t0))
+                             critic_W_estimate=w_est, val_ks=ks, elapsed_s=time.time() - t0, **tgp_stats(a)))
             log(f"[{variant} s{seed}] it {it} LD {loss.item():.3f} LG {lossG.item():.3f} val_KS {ks:.4f}")
             if ks < best - 1e-4:
                 best, best_state, bad, best_it = ks, copy.deepcopy(G.state_dict()), 0, it

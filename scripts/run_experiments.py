@@ -5,6 +5,8 @@
   python scripts/run_experiments.py main        --dataset cicids2017 [--methods ...] [--seeds ...]
   python scripts/run_experiments.py sensitivity --dataset cicids2017
   python scripts/run_experiments.py transfer    --source cicids2017 --target cicids2018
+  python scripts/run_experiments.py backbone    --dataset cicids2017   # Transformer backbone, Section 4.8
+  python scripts/run_experiments.py diagnostic  --dataset cicids2017   # CNN-LSTM runs logging TGP activity
   python scripts/make_tables.py
 Add  --set train.n_iters=200 eval.ks_bootstrap=20 ...  to override configuration values."""
 # --- run from the package root, whatever the current directory ---
@@ -16,7 +18,7 @@ import argparse, os, sys, traceback, ast
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tg.utils import load_cfg, load_json
 from tg.data import prepare, load_prepared
-from tg.experiment import ALL_METHODS, run_one, run_transfer
+from tg.experiment import ALL_METHODS, BACKBONE_METHODS, DIAGNOSTIC_METHODS, run_one, run_transfer
 
 
 def parse_sets(items):
@@ -33,7 +35,7 @@ def parse_sets(items):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("stage", choices=["prepare", "main", "sensitivity", "transfer"])
+    ap.add_argument("stage", choices=["prepare", "main", "sensitivity", "transfer", "backbone", "diagnostic"])
     ap.add_argument("--dataset"); ap.add_argument("--source"); ap.add_argument("--target")
     ap.add_argument("--methods", nargs="*"); ap.add_argument("--seeds", nargs="*", type=int)
     ap.add_argument("--T", type=int); ap.add_argument("--config", default="configs/default.yaml")
@@ -64,6 +66,33 @@ def main():
                 print(f"== {a.dataset} {m} seed {seed}", flush=True)
                 try:
                     run_one(a.dataset, m, seed, data, prep, cfg, out)
+                except Exception:
+                    traceback.print_exc()
+                    os.makedirs(out, exist_ok=True)
+                    open(os.path.join(out, "ERROR.txt"), "w").write(traceback.format_exc())
+        return
+
+    if a.stage in ("backbone", "diagnostic"):
+        # backbone: Transformer variants, full test-set evaluation -> results/<ds>/<method>/seed<k>
+        # diagnostic: CNN-LSTM re-runs whose log.csv records TGP activity, validation evaluation only
+        #             -> results/<ds>/diagnostic/<method>/seed<k>
+        data, prep = load_prepared(a.dataset, cfg)
+        ex = cfg["experiments"]
+        bb = a.stage == "backbone"
+        methods = a.methods or (BACKBONE_METHODS if bb else DIAGNOSTIC_METHODS)
+        seeds = a.seeds if a.seeds is not None else ex["backbone_seeds" if bb else "diagnostic_seeds"]
+        for seed in seeds:
+            for m in methods:
+                out = os.path.join(R, a.dataset, m, f"seed{seed}") if bb else \
+                    os.path.join(R, a.dataset, "diagnostic", m, f"seed{seed}")
+                if os.path.exists(os.path.join(out, "metrics.json")):
+                    continue
+                print(f"== {a.stage} {a.dataset} {m} seed {seed}", flush=True)
+                try:
+                    if bb:
+                        run_one(a.dataset, m, seed, data, prep, cfg, out)
+                    else:
+                        run_one(a.dataset, m, seed, data, prep, cfg, out, eval_split="val", full_metrics=False)
                 except Exception:
                     traceback.print_exc()
                     os.makedirs(out, exist_ok=True)

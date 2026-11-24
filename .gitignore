@@ -13,3 +13,6 @@ run_log*.txt
 *.pkl
 .ipynb_checkpoints/
 .DS_Store
+tests/raw/
+tests/processed/
+tests/results/

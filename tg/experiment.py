@@ -3,7 +3,7 @@ from __future__ import annotations
 import os, pickle, re, time
 import numpy as np
 import torch
-from .train_gan import VARIANTS, train_trafficgan, train_mlp_gan, generate
+from .train_gan import VARIANTS, BACKBONE_VARIANTS, train_trafficgan, train_mlp_gan, generate
 from .metrics import fidelity, temporal, discriminative_score, prdc, EntropyJudge, tstr
 from .ids import augmentation_counts, augmented_flows, ros_windows, smote_flows, evaluate_ids
 from .models import Generator
@@ -12,7 +12,9 @@ from .utils import device, save_json, load_json
 TG_METHODS = ["trafficgan", "no_tgp", "no_ase", "wgan_gp", "alt_sn", "alt_lp", "alt_acgan", "alt_pacgan"]
 OTHER_GEN = ["mlp_gan", "mlp_wgan", "ctgan", "copulagan", "tabddpm", "timegan", "dgan"]
 NON_GEN = ["none", "ros", "smote"]
-ALL_METHODS = NON_GEN + OTHER_GEN + TG_METHODS
+ALL_METHODS = NON_GEN + OTHER_GEN + TG_METHODS          # Sections 4.1-4.7
+BACKBONE_METHODS = BACKBONE_VARIANTS                   # Section 4.8 (stage "backbone")
+DIAGNOSTIC_METHODS = ["wgan_gp", "trafficgan"]          # Table S9 (stage "diagnostic")
 
 
 def build_sampler(method, data, prep, cfg, seed, run_dir, log=print):
