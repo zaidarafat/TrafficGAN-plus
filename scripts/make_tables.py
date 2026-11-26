@@ -359,6 +359,7 @@ def main():
                                           "Class entropy (bits) ↑"]),
               "table12_backbone", TD, "Table 12. Transformer backbone with and without TGP and ASE (CIC-IDS-2017, test partition)")
         mets = [("mean KS/TVD", "fidelity.mean"), ("increment-KS", "temporal.increment_ks"),
+                ("precision", "prdc.precision"), ("coverage", "prdc.coverage"),
                 ("class entropy", "diversity.class_entropy_bits"), ("label agreement", "diversity.label_agreement"),
                 ("DNN macro-F1", "ids.dnn.macro_f1"), ("TSTR macro-F1", "tstr_macro_f1")]
         spec_d = [(f"{NAMES[x]} vs {NAMES[y]}", x, y, lab, path)
