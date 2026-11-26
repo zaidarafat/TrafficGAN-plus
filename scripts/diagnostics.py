@@ -97,7 +97,7 @@ def s6_ase(datasets):
             out.append({"Dataset": DS[ds], "Variant": NAMES.get(m, m), "n seeds": len(a),
                         "ASE at checkpoint (nats)": ms(a), "Share of ln K (%)": f"{100 * np.mean(a) / math.log(K):.1f}",
                         "RF class entropy (bits)": ms(ent, 2),
-                        "Share of log2 K (%)": f"{100 * np.mean(ent) / math.log2(K):.0f}" if ent else "–",
+                        "Share of log2 K (%)": f"{100 * np.mean(ent) / math.log2(K):.1f}" if ent else "–",
                         "Label agreement": ms(agr, 2)})
     if out:
         write(pd.DataFrame(out), "tableS6_ase_saturation",
@@ -205,7 +205,7 @@ def t11(datasets):
         tg = S.get(("atom", "trafficgan"))
         rows.append({"Dataset": DS[ds],
                      "ASE proxy, WGAN-GP / TrafficGAN+ (%)": f"{S[('ase', 'wgan_gp')][0]:.1f} / {S[('ase', 'trafficgan')][0]:.1f}",
-                     "RF entropy, WGAN-GP / TrafficGAN+ (%)": f"{S[('ase', 'wgan_gp')][1]:.0f} / {S[('ase', 'trafficgan')][1]:.0f}",
+                     "RF entropy, WGAN-GP / TrafficGAN+ (%)": f"{S[('ase', 'wgan_gp')][1]:.1f} / {S[('ase', 'trafficgan')][1]:.1f}",
                      "Zero increments in real test windows (%)": f"{S['zero']:.1f}",
                      "Increment-KS of TrafficGAN+ (zero-atom part)": f"{tg[0]:.3f} ({tg[1]:.3f})" if tg else "–",
                      "Zero-atom share, all generators (%)": f"{min(sh):.0f}–{max(sh):.0f}" if sh else "–"})
